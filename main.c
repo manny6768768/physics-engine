@@ -11,38 +11,53 @@ typedef struct Ball {
     double y_velocity;
     double x_velocity;
     double mass;
+    bool is_dragging;
+    double prev_x;
+    double prev_y;
     double x_friction;
 } Ball;
 
+
 void UpdateBall(Ball *ball, double gravity, double *screen);
 void BallBounce(Ball *ball1, Ball *ball2);
+void DrawVectorBall(Ball ball);
+bool MouseBall(Ball *ball, Vector2 mouse_pos, float dt);
+
+Vector2 original_ball_pos;
+
 
 int main(void)
 {
-    const int screen_x = 1200;
-    const int screen_y = 850;
-    const int num_balls = 3;
+    const int screen_x = 1920;
+    const int screen_y = 1080;
+    const int num_balls = 4;
 
     double gravity = 0.4;
 
-    Ball ball1 = {800.0, 200.0, 30.0, 0.80, -15.0, -5.0, 2.0}; // missing friction
-    Ball ball2 = {400.0, 200.0, 25.0, 0.85, -10.0, -2.5, 1.0}; // missing friction
-    Ball ball3 = {200.0, 200.0, 35.0, 0.75, -5.0, 1.0, 2.5}; // missing friction
+    Ball ball1 = {800.0, 200.0, 30.0, 0.80, -15.0, -5.0, 2.0, false, 0, 0}; // missing friction is 0
+    Ball ball2 = {400.0, 200.0, 25.0, 0.85, -10.0, -2.5, 1.0, false, 0, 0}; // missing friction is 0
+    Ball ball3 = {200.0, 200.0, 35.0, 0.75, -5.0, 1.0, 2.5, false, 0, 0}; // missing friction is 0
+    Ball ball4 = {1000.0, 200.0, 15.0, 0.25, -20.0, -10.0, 1000.0, false, 0, 0}; // missing friction is 0
 
-    Ball balls[] = {ball1, ball2, ball3};
+    Ball balls[] = {ball1, ball2, ball3, ball4};
 
     balls[0].x_friction = gravity * balls[0].mass * 0.50;
     balls[1].x_friction = gravity * balls[1].mass * 0.05;
     balls[2].x_friction = gravity * balls[2].mass * 0.01;
+    balls[3].x_friction = gravity * balls[3].mass * 0.9999;
 
 
     InitWindow(screen_x, screen_y, "physics engine");
+    ToggleFullscreen();
     SetTargetFPS(60);
 
     while (!WindowShouldClose())
     {   // Update ball velocity
         for (int i = 0; i < num_balls; i++) {
+            float dt = GetFrameTime();
+            if (!MouseBall(&balls[i], GetMousePosition(), dt)) {
             UpdateBall(&balls[i], gravity, (double[]){screen_y, screen_x});
+            }
         }
         // Handle ball collisions
         for (int i = 0; i < num_balls; i++) {
@@ -57,10 +72,52 @@ int main(void)
         DrawCircle(balls[0].x, balls[0].y, balls[0].radius, RED);
         DrawCircle(balls[1].x, balls[1].y, balls[1].radius, GREEN);
         DrawCircle(balls[2].x, balls[2].y, balls[2].radius, BLUE);
+        DrawCircle(balls[3].x, balls[3].y, balls[3].radius, BLACK);
+        DrawVectorBall(balls[0]);
+        DrawVectorBall(balls[1]);
+        DrawVectorBall(balls[2]);
+        DrawVectorBall(balls[3]);
         EndDrawing();
     }
 }
 
+bool MouseBall(Ball *ball, Vector2 mouse_pos, float dt) {
+
+    double dx = mouse_pos.x - ball->x;
+    double dy = mouse_pos.y - ball->y;
+    double dist = sqrt(dx*dx + dy*dy);
+
+    // Start dragging
+    if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && dist <= ball->radius) {
+        ball->is_dragging = true;
+        ball->prev_x = mouse_pos.x;  
+        ball->prev_y = mouse_pos.y;  
+        ball->x_velocity = 0;
+        ball->y_velocity = 0;
+    }
+
+    // While dragging
+    if (IsMouseButtonDown(MOUSE_LEFT_BUTTON) && ball->is_dragging) {
+        // velocity in pixels/frame, not pixels/second
+        ball->x_velocity = mouse_pos.x - ball->prev_x;
+        ball->y_velocity = mouse_pos.y - ball->prev_y;
+
+        ball->prev_x = mouse_pos.x;
+        ball->prev_y = mouse_pos.y;
+
+        ball->x = mouse_pos.x;
+        ball->y = mouse_pos.y;
+
+        return true;
+    }
+
+    // Release
+    if (IsMouseButtonReleased(MOUSE_LEFT_BUTTON) && ball->is_dragging) {
+        ball->is_dragging = false;
+    }
+
+    return ball->is_dragging;
+}
 // Update ball position and velocity, handle collisions with floor, ceiling, and walls
 void UpdateBall(Ball *ball, double gravity, double *screen) {
     ball->y_velocity += gravity;
@@ -74,7 +131,6 @@ void UpdateBall(Ball *ball, double gravity, double *screen) {
         if (fabs(ball->y_velocity) < 0.341) ball->y_velocity = 0.0;
 
         double friction_acc = ball->x_friction / ball->mass;
- 
         if (ball->x_velocity > 0.0) {
             ball->x_velocity -= friction_acc;
             if (ball->x_velocity < 0.0) ball->x_velocity = 0.0;
@@ -148,3 +204,12 @@ void BallBounce(Ball *ball1, Ball *ball2) {
     }
 }
 
+void DrawVectorBall(Ball ball) {
+    // Implementation for drawing the ball vector
+    if (ball.x_velocity == 0 && ball.y_velocity == 0) return; 
+    if (ball.is_dragging) return; // Don't draw velocity vector while dragging
+    Vector2 velocity_vector = {ball.x_velocity, ball.y_velocity};
+    DrawLine(ball.x, ball.y, ball.x + velocity_vector.x * 5, ball.y + velocity_vector.y * 5, BLACK);
+    DrawText(TextFormat("vx: %.2f", ball.x_velocity), ball.x + ball.radius*1.5, ball.y - 20, 10, DARKGRAY);
+    DrawText(TextFormat("vy: %.2f", ball.y_velocity), ball.x + ball.radius*1.5, ball.y - 10, 10, DARKGRAY);
+}
