@@ -78,6 +78,7 @@ int main(void)
         DrawVectorBall(balls[3]);
         EndDrawing();
     }
+    return 0; 
 }
 
 bool MouseBall(Ball *ball, Vector2 mouse_pos, float dt) {
