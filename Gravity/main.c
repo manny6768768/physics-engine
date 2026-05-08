@@ -24,8 +24,9 @@ void BallMovement(Ball *ball);
 bool MouseBall(Ball *ball, Vector2 mouse_pos, float dt);
 void add_ball( Ball *new_ball);
 void clickadd ( Vector2 mouse_pos);
-bool Ballcollide (Ball *b1, Ball *b2);
+int Ballcollide (Ball *b1, Ball *b2);
 void gravity (Ball *b1, Ball *b2);
+void temperature_change (Ball *b1, Ball *b2);
 void remove_ball(Ball *to_remove);
 
 const int screen_x = 1920;
@@ -33,6 +34,8 @@ const int screen_y = 1080;
 const double MAX_TEMP = 10000.0;
 Ball *HEAD = NULL;
 bool PAUSED = false;
+
+float dt;
 
 int main(void)
 {
@@ -42,10 +45,12 @@ int main(void)
 
     InitWindow(screen_x, screen_y, "physics engine");
     ToggleFullscreen();
-    SetTargetFPS(60);
+    SetTargetFPS(120);
 
     while (!WindowShouldClose())
     {
+        dt = GetFrameTime();
+
         if (IsMouseButtonPressed(MOUSE_RIGHT_BUTTON)) {
             clickadd(GetMousePosition());
         }
@@ -55,28 +60,26 @@ int main(void)
         }
         // Gravity loop
         if (!PAUSED) {
-            Ball *b1 = HEAD;
-            while (b1 != NULL) {
-                Ball *next_b1 = b1->next;
-                Ball *b2 = b1->next;
-                while (b2 != NULL) {
-                    Ball *next_b2 = b2->next;
-                    if (Ballcollide(b1, b2)) {
-                        break;
+            Ball *ballA = HEAD;
+            while (ballA != NULL) {
+                Ball *nextA = ballA->next;  
+                Ball *ballB = ballA->next;
+                while (ballB != NULL) {
+                    Ball *nextB = ballB->next;
+                    if (Ballcollide(ballA, ballB) == 0) {
+                        gravity(ballA, ballB);
+                        temperature_change(ballA, ballB);
                     }
-                    if (!b1->is_dragging && !b2->is_dragging) {
-                        gravity(b1, b2);  
-                    }
-                    b2 = next_b2;
+                    ballB = nextB;  
                 }
-                b1 = next_b1;
+                ballA = nextA;
             }
-        }
+}
         // Physics loop
         Ball *ball = HEAD;
         while (ball != NULL) {
             Ball *next = ball->next;
-            MouseBall(ball, GetMousePosition(), GetFrameTime());
+            MouseBall(ball, GetMousePosition(), dt);
             if (!ball->is_dragging && !PAUSED) {
                 BallMovement(ball);
             }
@@ -89,6 +92,8 @@ int main(void)
         while (ball != NULL) {
             unsigned char t = (unsigned char)((ball->temperature / MAX_TEMP) * 255);
             DrawCircle(ball->position.x, ball->position.y, ball->radius, (Color){t, 0, 255 - t, 255});
+            DrawText(TextFormat("Velocity: %.2f", Vector2Length(ball->velocity)), ball->position.x - 20, ball->position.y + ball->radius + 50, 10, WHITE);
+            DrawText(TextFormat("Temperature: %.2f", ball->temperature), ball->position.x - 20, ball->position.y + ball->radius + 35, 10, WHITE);
             ball = ball->next;
         }
         EndDrawing();
@@ -98,7 +103,13 @@ int main(void)
 
 void BallMovement(Ball *ball)
 {
-    ball->position = Vector2Add(ball->position, ball->velocity);
+
+    ball->temperature -= 0.00001 * ball->temperature * dt;
+
+    ball->position = (Vector2){
+        ball->position.x + ball->velocity.x * dt,
+        ball->position.y + ball->velocity.y * dt
+    };
 
     if (ball->position.y - ball->radius > screen_y + 100)
     {
@@ -137,8 +148,8 @@ bool MouseBall(Ball *ball, Vector2 mouse_pos, float dt) {
     // While dragging
     if (IsMouseButtonDown(MOUSE_LEFT_BUTTON) && ball->is_dragging) {
         // velocity in pixels/frame, not pixels/second
-        ball->velocity.x = mouse_pos.x - ball->prev_x;
-        ball->velocity.y = mouse_pos.y - ball->prev_y;
+        ball->velocity.x = (mouse_pos.x - ball->prev_x )/ dt;
+        ball->velocity.y = (mouse_pos.y - ball->prev_y)/ dt;
 
         ball->prev_x = mouse_pos.x;
         ball->prev_y = mouse_pos.y;
@@ -189,7 +200,7 @@ void clickadd (Vector2 mouse_pos) {
     new_ball->mass = density * (4.0/3.0) * PI * pow(new_ball->radius, 3); // calculate mass based on volume and density (realism)
 
     new_ball->velocity = (Vector2){0, 0};
-    new_ball->temperature = MAX_TEMP * K * 0.75;
+    new_ball->temperature = MAX_TEMP * K * 0.90;
     new_ball->is_dragging = false;
     new_ball->elasticity = 0.8;
     new_ball->next = NULL;
@@ -197,7 +208,7 @@ void clickadd (Vector2 mouse_pos) {
     add_ball(new_ball);
 }
 
-bool Ballcollide (Ball *b1, Ball *b2) {
+int Ballcollide (Ball *b1, Ball *b2) {
 
     double epsilon = 0.01;
 
@@ -210,31 +221,50 @@ bool Ballcollide (Ball *b1, Ball *b2) {
         Ball *better = (b1->mass >= b2->mass) ? b1 : b2;
         Ball *worse = (better == b1) ? b2 : b1;
 
+        double m1 = better->mass;
+        double m2 = worse->mass;
         double total_mass = better->mass + worse->mass;
 
+         //Temperature change based on kinetic energy lost in the collision
+        Vector2 relative = Vector2Subtract(better->velocity, worse->velocity);
+
+        double avg_temp = (m1 * better->temperature + m2 * worse->temperature) / total_mass;
+
+        double rel_speed = Vector2Length(relative);
+        double constant = 0.0001; 
+        double delta_t = (constant* m1 * m2 * rel_speed * rel_speed) / (total_mass * total_mass);
+
+
+        // Conservation of momentum for inelastic collision
         better->velocity = (Vector2){
             (
-                better->velocity.x * better->mass +
-                worse->velocity.x  * worse->mass
+                better->velocity.x * m1 +
+                worse->velocity.x  * m2
             ) / total_mass,
 
             (
-                better->velocity.y * better->mass +
-                worse->velocity.y  * worse->mass
+                better->velocity.y * m1 +
+                worse->velocity.y  * m2
             ) / total_mass
         };
 
-        better->radius = better->radius = cbrt(pow(better->radius, 3) + pow(worse->radius, 3));
-        better->mass += worse->mass;
+        better->temperature = avg_temp + delta_t;
+        better->radius = cbrt((better->radius * better->radius * better->radius) + (worse->radius * worse->radius * worse->radius));
+        better->mass = total_mass;
+
+        if (better->temperature > MAX_TEMP) {
+            better->temperature = MAX_TEMP;
+        }
+
         remove_ball(worse);
-        return true;
+        return 1;
     }
-    return false;
+    return 0;
 }
 
 void gravity (Ball *b1, Ball *b2)
 {
-    double G = 0.000075; // Gravitational constant, adjusted for simulation scale
+    double G = 0.1; // Gravitational constant, adjusted for simulation scale
 
     double dx = b2->position.x - b1->position.x;
     double dy = b2->position.y - b1->position.y;
@@ -252,8 +282,15 @@ void gravity (Ball *b1, Ball *b2)
     double ax2 = -G * b1->mass * dx * inv_r3;
     double ay2 = -G * b1->mass * dy * inv_r3;
 
-    b1->velocity = Vector2Add(b1->velocity, (Vector2){ax1, ay1});
-    b2->velocity = Vector2Add(b2->velocity, (Vector2){ax2, ay2});
+    b1->velocity = (Vector2){
+        b1->velocity.x + ax1 * dt,
+        b1->velocity.y + ay1 * dt
+    };
+
+    b2->velocity = (Vector2){
+        b2->velocity.x + ax2 * dt,
+        b2->velocity.y + ay2 * dt
+    };
 }
 
 void remove_ball(Ball *to_remove) {
@@ -278,7 +315,19 @@ void remove_ball(Ball *to_remove) {
     printf("Error: Ball not found in the list.\n");
 }
 
-void temperature_change(Ball *b1, Ball *b2) {
-    // TODO
-}
+void temperature_change(Ball *b1, Ball *b2)
+{
+    double dx = b2->position.x - b1->position.x;
+    double dy = b2->position.y - b1->position.y;
 
+    double r2 = dx*dx + dy*dy + 1.0;
+
+    double temp_diff =
+        b1->temperature - b2->temperature;
+
+    double transfer =
+        temp_diff * 2* dt / r2;
+
+    b1->temperature -= transfer;
+    b2->temperature += transfer;
+}
