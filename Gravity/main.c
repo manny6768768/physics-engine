@@ -29,11 +29,10 @@ void gravity (Ball *b1, Ball *b2);
 void temperature_change (Ball *b1, Ball *b2);
 void remove_ball(Ball *to_remove);
 
-const int screen_x = 1920;
-const int screen_y = 1080;
-const double MAX_TEMP = 10000.0;
+const double MAX_TEMP = 100000.0;
 Ball *HEAD = NULL;
 bool PAUSED = false;
+float timescale = 1.0;
 
 float dt;
 
@@ -43,16 +42,93 @@ int main(void)
     *ball1 = (Ball){.position = {960.0, 540.0}, .radius = 10.0, .velocity = {0, 0}, .mass = 5.0, .temperature = 0, .is_dragging = false, .elasticity = 0.8, .next = NULL};
     HEAD = ball1;
 
-    InitWindow(screen_x, screen_y, "physics engine");
-    ToggleFullscreen();
-    SetTargetFPS(120);
+    SetConfigFlags(FLAG_WINDOW_UNDECORATED);
+    InitWindow(GetMonitorWidth(0), GetMonitorHeight(0), "physics engine");
+
+    Camera2D camera = {0};
+    Vector2 prevMouse = {0};
+
+    camera.target = (Vector2){GetMonitorWidth(0)/2.0, GetMonitorHeight(0)/2.0};
+    camera.offset = (Vector2){GetMonitorWidth(0) / 2.0f, GetMonitorHeight(0) / 2.0f};
+    camera.rotation = 0.0f;
+    camera.zoom = 1.0f;
+    SetTargetFPS(240);
 
     while (!WindowShouldClose())
     {
-        dt = GetFrameTime();
+
+        Vector2 mouse_world_pos = GetScreenToWorld2D(GetMousePosition(), camera);
+
+        if (IsMouseButtonPressed(MOUSE_MIDDLE_BUTTON))
+        {
+            prevMouse = GetMousePosition();
+        }
+
+        if (IsMouseButtonDown(MOUSE_MIDDLE_BUTTON))
+        {
+            Vector2 mouse = GetMousePosition();
+
+            Vector2 delta = Vector2Subtract(prevMouse, mouse);
+
+            delta = Vector2Scale(delta, 1.0f / camera.zoom);
+
+            camera.target = Vector2Add(camera.target, delta);
+
+            prevMouse = mouse;
+        }
+
+        float wheel = GetMouseWheelMove();
+
+        if (wheel != 0)
+        {
+            Vector2 mouseWorldBefore =
+                GetScreenToWorld2D(GetMousePosition(), camera);
+
+            // Zoom
+            camera.zoom += wheel * 0.1f;
+
+            // Clamp zoom
+            if (camera.zoom < 0.07f)
+                camera.zoom = 0.07f;
+
+            if (camera.zoom > 50.0f)
+                camera.zoom = 50.0f;
+
+            // World position after zoom
+            Vector2 mouseWorldAfter =
+                GetScreenToWorld2D(GetMousePosition(), camera);
+
+            // Move camera so cursor stays on same world point
+            camera.target = Vector2Add(
+                camera.target,
+                Vector2Subtract(mouseWorldBefore, mouseWorldAfter)
+            );
+        }
+
+        dt = GetFrameTime() * timescale;
+
+        if (dt > 0.1) {
+            dt = 0.1; 
+        }
+
+        if (IsKeyDown(KEY_KP_ADD))
+        {
+            timescale += 0.5;
+
+            if (timescale > 200.0)
+                timescale = 200.0;
+        }
+
+        if (IsKeyDown(KEY_KP_SUBTRACT))
+        {
+            timescale -= 0.5;
+
+            if (timescale < 1)
+                timescale = 1;
+        }
 
         if (IsMouseButtonPressed(MOUSE_RIGHT_BUTTON)) {
-            clickadd(GetMousePosition());
+            clickadd(mouse_world_pos);
         }
 
         if (IsKeyPressed(KEY_SPACE)) {
@@ -79,7 +155,7 @@ int main(void)
         Ball *ball = HEAD;
         while (ball != NULL) {
             Ball *next = ball->next;
-            MouseBall(ball, GetMousePosition(), dt);
+            MouseBall(ball, mouse_world_pos, dt);
             if (!ball->is_dragging && !PAUSED) {
                 BallMovement(ball);
             }
@@ -88,14 +164,17 @@ int main(void)
 
         BeginDrawing();
         ClearBackground(BLACK);
+        BeginMode2D(camera);
         ball = HEAD;
         while (ball != NULL) {
             unsigned char t = (unsigned char)((ball->temperature / MAX_TEMP) * 255);
             DrawCircle(ball->position.x, ball->position.y, ball->radius, (Color){t, 0, 255 - t, 255});
             DrawText(TextFormat("Velocity: %.2f", Vector2Length(ball->velocity)), ball->position.x - 20, ball->position.y + ball->radius + 50, 10, WHITE);
-            DrawText(TextFormat("Temperature: %.2f", ball->temperature), ball->position.x - 20, ball->position.y + ball->radius + 35, 10, WHITE);
+            DrawText(TextFormat("Temperature: %.2fX", ball->temperature), ball->position.x - 20, ball->position.y + ball->radius + 35, 10, WHITE);
             ball = ball->next;
         }
+        EndMode2D();
+        DrawText(TextFormat("Time warp: %.2f", timescale), 10, 20, 20, WHITE);
         EndDrawing();
     }
     return 0;
@@ -111,21 +190,21 @@ void BallMovement(Ball *ball)
         ball->position.y + ball->velocity.y * dt
     };
 
-    if (ball->position.y - ball->radius > screen_y + 100)
+    if (ball->position.y - ball->radius > GetMonitorHeight(0) + 10000000)
     {
         remove_ball(ball);
     }
 
-    if (ball->position.y + ball->radius < 0 - 100)
+    if (ball->position.y + ball->radius < 0 - 10000000)
     {
         remove_ball(ball);
     }
 
-    if (ball->position.x + ball->radius < 0 - 100)
+    if (ball->position.x + ball->radius < 0 - 10000000)
     {
         remove_ball(ball);
     }
-    if (ball->position.x - ball->radius > screen_x + 100)
+    if (ball->position.x - ball->radius > GetMonitorWidth(0) + 10000000)
     {
         remove_ball(ball);
     }
@@ -200,7 +279,7 @@ void clickadd (Vector2 mouse_pos) {
     new_ball->mass = density * (4.0/3.0) * PI * pow(new_ball->radius, 3); // calculate mass based on volume and density (realism)
 
     new_ball->velocity = (Vector2){0, 0};
-    new_ball->temperature = MAX_TEMP * K * 0.90;
+    new_ball->temperature = MAX_TEMP * K * 0.99;
     new_ball->is_dragging = false;
     new_ball->elasticity = 0.8;
     new_ball->next = NULL;
@@ -330,4 +409,8 @@ void temperature_change(Ball *b1, Ball *b2)
 
     b1->temperature -= transfer;
     b2->temperature += transfer;
+}
+
+void target_cam_planet(Ball *ball, Camera2D *camera, Vector2 mouse_pos){
+    //pass
 }
